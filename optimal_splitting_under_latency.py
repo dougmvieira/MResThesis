@@ -37,14 +37,20 @@ def print_used_params():
 def harmonic_sum(x, y):
     return 1/((1/x)+(1/y))
 
-def eta_tilde(eta, gamma, tau):
+def _eta_tilde(eta, gamma, tau):
     return eta*(1 - (gamma*tau)/(2*eta))
 
-def kappa_tilde_squared(lbda, sigma, _eta_tilde):
-    return lbda*(sigma**2)/_eta_tilde
+def _kappa_tilde_squared(lbda, sigma, eta_tilde):
+    return lbda*(sigma**2)/eta_tilde
 
-def kappa(_kappa_tilde_squared, tau):
-    return np.arccosh(_kappa_tilde_squared*(tau**2)/2 + 1)/tau
+def _kappa(kappa_tilde_squared, tau):
+    return np.arccosh(kappa_tilde_squared*(tau**2)/2 + 1)/tau
+
+def derived_params(eta, gamma, tau, lbda, sigma):
+    eta_tilde = _eta_tilde(eta, gamma, tau)
+    kappa_tilde_squared = _kappa_tilde_squared(lbda, sigma, eta_tilde)
+    kappa = _kappa(kappa_tilde_squared, tau)
+    return eta_tilde, kappa
 
 def almgren_chriss(size, steps, final_time, volatility, risk_aversion,
                    temp_impact, perma_impact):
@@ -58,11 +64,9 @@ def almgren_chriss(size, steps, final_time, volatility, risk_aversion,
     tau = big_t/big_n
     t_j = np.linspace(0, big_t, big_n + 1)
 
-    _eta_tilde = eta_tilde(eta, gamma, tau)
-    _kappa_tilde_squared = kappa_tilde_squared(lbda, sigma, _eta_tilde)
-    _kappa = kappa(_kappa_tilde_squared, tau)
+    eta_tilde, kappa = derived_params(eta, gamma, tau, lbda, sigma)
 
-    inventory_values = size*np.sinh(_kappa*(big_t - t_j))/np.sinh(_kappa*big_t)
+    inventory_values = size*np.sinh(kappa*(big_t - t_j))/np.sinh(kappa*big_t)
 
     return pd.Series(inventory_values, t_j)
 
@@ -73,7 +77,7 @@ def almgren_chriss_example():
     volatility = test_params['sigma']
     temp_impact = test_params['eta']
     perma_impact = test_params['gamma']
-    
+ 
     trajectory = almgren_chriss(size, steps, final_time, volatility,
                                 2e-6, temp_impact, perma_impact)
     trajectory.plot()
@@ -90,20 +94,17 @@ def model_with_latency(size, decision_lag, execution_delay, final_time,
 
     big_n = ceil((big_t-big_delta)/h)
     big_t_tilde = big_n*h - big_delta
-    _eta_tilde = eta_tilde(eta, gamma, h)
-    _kappa_tilde_squared = kappa_tilde_squared(lbda, sigma, _eta_tilde)
-    _kappa = kappa(_kappa_tilde_squared, h)
-    almgren_chris_params = ()
+    eta_tilde, kappa = derived_params(eta, gamma, h, lbda, sigma)
 
     impulse_exec_times = np.arange(big_n)*h + big_delta
     time_stamps = np.hstack((0, impulse_exec_times))
 
-    almgren_chriss_big_y_1 = (size*np.sinh(_kappa*big_t_tilde)
-                              )/np.sinh(_kappa*(big_t_tilde+h))
+    almgren_chriss_big_y_1 = (size*np.sinh(kappa*big_t_tilde)
+                              )/np.sinh(kappa*(big_t_tilde+h))
     if big_delta == h:
         big_y_1 = almgren_chriss_big_y_1
     else:
-        adjust = (_eta_tilde*size)/(h*lbda*(big_delta-h)*sigma**2)
+        adjust = (eta_tilde*size)/(h*lbda*(big_delta-h)*sigma**2)
         big_y_1 = harmonic_sum(almgren_chriss_big_y_1,
                                adjust)
 
@@ -129,24 +130,22 @@ def strategy_mean(size, decision_lag, execution_delay, final_time, volatility,
 
     big_n = ceil((big_t-big_delta)/h)
     big_t_tilde = big_n*h - big_delta
-    _eta_tilde = eta_tilde(eta, gamma, h)
-    _kappa_tilde_squared = kappa_tilde_squared(lbda, sigma, _eta_tilde)
-    _kappa = kappa(_kappa_tilde_squared, h)
+    eta_tilde, kappa = derived_params(eta, gamma, h, lbda, sigma)
  
-    almgren_chriss_big_y_1 = (size*np.sinh(_kappa*big_t_tilde)
-                              )/np.sinh(_kappa*(big_t_tilde+h))
+    almgren_chriss_big_y_1 = (size*np.sinh(kappa*big_t_tilde)
+                              )/np.sinh(kappa*(big_t_tilde+h))
     if big_delta == h:
         big_y_1 = almgren_chriss_big_y_1
     else:
-        adjust = (_eta_tilde*size)/(h*lbda*(big_delta-h)*sigma**2)
+        adjust = (eta_tilde*size)/(h*lbda*(big_delta-h)*sigma**2)
         big_y_1 = harmonic_sum(almgren_chriss_big_y_1,
                                adjust)
 
-    return (epsilon*y + gamma/2*y**2 + 2*_eta_tilde/h*(y-big_y_1)**2
-            + _eta_tilde*big_y_1**2*(
-                np.tanh(.5*_kappa*h)*(h*np.sinh(2*_kappa*big_t_tilde)
-                                     + 2*big_t_tilde*np.sinh(_kappa*h))
-                /(np.sinh(_kappa*big_t_tilde)**2*np.sinh(_kappa*h))))
+    return (epsilon*y + gamma/2*y**2 + 2*eta_tilde/h*(y-big_y_1)**2
+            + eta_tilde*big_y_1**2*(
+                np.tanh(.5*kappa*h)*(h*np.sinh(2*kappa*big_t_tilde)
+                                     + 2*big_t_tilde*np.sinh(kappa*h))
+                /(np.sinh(kappa*big_t_tilde)**2*np.sinh(kappa*h))))
 
 def strategy_var(size, decision_lag, execution_delay, final_time, volatility,
                  risk_aversion, fix_impact, temp_impact, perma_impact):
@@ -160,19 +159,17 @@ def strategy_var(size, decision_lag, execution_delay, final_time, volatility,
 
     big_n = ceil((big_t-big_delta)/h)
     big_t_tilde = big_n*h - big_delta
-    _eta_tilde = eta_tilde(eta, gamma, h)
-    _kappa_tilde_squared = kappa_tilde_squared(lbda, sigma, _eta_tilde)
-    _kappa = kappa(_kappa_tilde_squared, h)
+    eta_tilde, kappa = derived_params(eta, gamma, h, lbda, sigma)
 
-    inv_ac_big_y_1 = (np.sinh(_kappa*(big_t_tilde+h))
-                      /np.sinh(_kappa*big_t_tilde))
-    adjust = (h*lbda*(big_delta-h)*sigma**2)/_eta_tilde
+    inv_ac_big_y_1 = (np.sinh(kappa*(big_t_tilde+h))
+                      /np.sinh(kappa*big_t_tilde))
+    adjust = (h*lbda*(big_delta-h)*sigma**2)/eta_tilde
     big_y_1 = size/(inv_ac_big_y_1 + adjust)
 
     return big_delta*sigma**2*big_y_1 + (.5*sigma**2*big_y_1**2*(
-             h*np.sinh(_kappa*big_t_tilde)*np.cosh(_kappa*(big_t_tilde-h))
-             - big_t_tilde*np.sinh(_kappa*h))
-             /(np.sinh(_kappa*big_t_tilde)**2*np.sinh(_kappa*h)))
+             h*np.sinh(kappa*big_t_tilde)*np.cosh(kappa*(big_t_tilde-h))
+             - big_t_tilde*np.sinh(kappa*h))
+             /(np.sinh(kappa*big_t_tilde)**2*np.sinh(kappa*h)))
  
 def almgren_chriss_var(size, steps, final_time, volatility, risk_aversion,
                        fix_impact, temp_impact, perma_impact):
@@ -187,14 +184,12 @@ def almgren_chriss_var(size, steps, final_time, volatility, risk_aversion,
     tau = big_t/big_n
     t_j = np.linspace(0, big_t, big_n + 1)
 
-    _eta_tilde = eta_tilde(eta, gamma, tau)
-    _kappa_tilde_squared = kappa_tilde_squared(lbda, sigma, _eta_tilde)
-    _kappa = kappa(_kappa_tilde_squared, tau)
+    eta_tilde, kappa = derived_params(eta, gamma, tau, lbda, sigma)
 
     return (.5*sigma**2*size**2*
-            (tau*np.sinh(_kappa*big_t)*np.cosh(_kappa*(big_t-tau))
-             -big_t*np.sinh(_kappa*tau))
-            /(np.sinh(_kappa*big_t)**2*np.sinh(_kappa*tau)))
+            (tau*np.sinh(kappa*big_t)*np.cosh(kappa*(big_t-tau))
+             -big_t*np.sinh(kappa*tau))
+            /(np.sinh(kappa*big_t)**2*np.sinh(kappa*tau)))
 
 def days_to_seconds(days):
     seconds_in_a_trading_day = (9*60 + 30)*60
@@ -287,21 +282,18 @@ def efficient_frontier_example():
     plt.savefig('efficient_frontier_example.png')
 
     # VaR example
-    #var99_with_latency = norm.ppf(.99)*np.sqrt(variances_with_latency)
-    #var99 = norm.ppf(.99)*np.sqrt(variances)
-    var99_with_latency = means + norm.ppf(.99)*np.sqrt(variances_with_latency)
-    var99 = means + norm.ppf(.99)*np.sqrt(variances)
+    var99_with_latency = norm.ppf(.99)*np.sqrt(variances_with_latency)
+    var99 = norm.ppf(.99)*np.sqrt(variances)
 
     fig = plt.figure(figsize=(10.24, 7.68))
     ax = fig.add_subplot(111)
     ax.plot(var99_with_latency, means_with_latency,
             label=r'$\Delta$=200ms')
     ax.plot(var99, means, label=r'$\Delta$=0ms')
-    #ax.set_xlabel(r'$\mathcal{N}^{-1}(.99)\sqrt{\mathrm{Variance}}$')
-    ax.set_xlabel('Value at Risk at 99%')
+    ax.set_xlabel(r'$\mathcal{N}^{-1}(.99)\sqrt{\mathrm{Variance}}$')
     ax.set_ylabel('Mean')
     ax.set_ylim((0, 3e6))
-    #ax.set_xlim((0, 4e3))
+    ax.set_xlim((0, 4e3))
     ax.legend()
     plt.tight_layout()
     plt.savefig('efficient_frontier_VaR_example.png')
