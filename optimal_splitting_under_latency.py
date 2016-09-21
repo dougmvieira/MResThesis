@@ -1,29 +1,14 @@
 from math import ceil
 from scipy.stats import norm
 import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
+import pandas as pd
+from almgren_chriss import figure2_params, derived_params, almgren_chriss
+from utils import days_to_seconds, miliseconds_to_days
 
 
 np.seterr('raise')
 
-def days_to_seconds(days):
-    seconds_in_a_trading_day = (9*60 + 30)*60
-    return days*seconds_in_a_trading_day
-
-def miliseconds_to_days(ms):
-    minutes_in_a_trading_day = 9*60 + 30
-    miliseconds_in_a_minute = 60*1000
-    return ms/(minutes_in_a_trading_day*miliseconds_in_a_minute)
-
-figure2_params = {'X':       10**6,         # shares
-                  'T':       5,             # days
-                  'N':       5,
-                  'sigma':   0.95,          # dollars per share per day sqrt
-                  'epsilon': 0.0625,        # dollars per share
-                  'gamma':   2.5*10**(-7),  # dollars per share squared
-                  'eta':     2.5*10**(-6),  # dollars per day
-                  'lbda':    2*10**(-6)}
 
 used_params = {'y':       figure2_params['X'],
                'T':       miliseconds_to_days(1000),
@@ -35,61 +20,36 @@ used_params = {'y':       figure2_params['X'],
                'Delta':   miliseconds_to_days(200),
                'lbda':    0.1}
 
+
 def print_used_params():
-    names_and_params = [('Initial inventory', '{}'.format(used_params['y'])),
-                        ('Time horizon', '{}s'.format(int(days_to_seconds(used_params['T'])))),
-                        ('Volatility (daily)', '{}'.format(used_params['sigma'])),
-                        (r'Temporary impact ($\epsilon$)', '{}'.format(used_params['epsilon'])),
-                        (r'Temporary impact ($\eta/h$)', '{:.5}'.format(used_params['eta']/miliseconds_to_days(10))),
-                        ('Permanent impact', '{}'.format(used_params['gamma'])),
-                        ('Decision lag', '{}ms'.format(int(1000*days_to_seconds(used_params['h'])))),
-                        ('Execution delay', '{}ms'.format(int(1000*days_to_seconds(used_params['Delta'])))),
-                        ('Risk aversion', '{}'.format(used_params['lbda']))]
+    names_and_params = [('Initial inventory',
+                         '{}'.format(used_params['y'])),
+                        ('Time horizon',
+                         '{}s'.format(int(days_to_seconds(used_params['T'])))),
+                        ('Volatility (daily)',
+                         '{}'.format(used_params['sigma'])),
+                        (r'Temporary impact ($\epsilon$)',
+                         '{}'.format(used_params['epsilon'])),
+                        (r'Temporary impact ($\eta/h$)',
+                         '{:.5}'.format(used_params['eta']
+                                        / miliseconds_to_days(10))),
+                        ('Permanent impact',
+                         '{}'.format(used_params['gamma'])),
+                        ('Decision lag', '{}ms'.format(
+                            int(1000*days_to_seconds(used_params['h'])))),
+                        ('Execution delay', '{}ms'.format(
+                            int(1000*days_to_seconds(used_params['Delta'])))),
+                        ('Risk aversion',
+                         '{}'.format(used_params['lbda']))]
     pd.DataFrame(names_and_params, columns=['Parameter', 'Value']
                  ).to_latex('used_params.tex', escape=False)
+
 
 def harmonic_sum(x, y):
     return 1/((1/x)+(1/y))
 
-def _eta_tilde(eta, gamma, tau):
-    return eta*(1 - (gamma*tau)/(2*eta))
 
-def _kappa_tilde_squared(lbda, sigma, eta_tilde):
-    return lbda*(sigma**2)/eta_tilde
-
-def _kappa(kappa_tilde_squared, tau):
-    return np.arccosh(kappa_tilde_squared*(tau**2)/2 + 1)/tau
-
-def derived_params(eta, gamma, tau, lbda, sigma):
-    eta_tilde = _eta_tilde(eta, gamma, tau)
-    kappa_tilde_squared = _kappa_tilde_squared(lbda, sigma, eta_tilde)
-    kappa = _kappa(kappa_tilde_squared, tau)
-    return eta_tilde, kappa
-
-def almgren_chriss(big_x, big_n, big_t, sigma, lbda, eta, gamma):
-    tau = big_t/big_n
-    eta_tilde, kappa = derived_params(eta, gamma, tau, lbda, sigma)
-
-    t_j = np.linspace(0, big_t, big_n + 1)
-    inventory_values = big_x*np.sinh(kappa*(big_t - t_j))/np.sinh(kappa*big_t)
-
-    return pd.Series(inventory_values, t_j)
-
-def almgren_chriss_example():
-    big_x = figure2_params['X']
-    big_n = figure2_params['N']
-    big_t = figure2_params['T']
-    sigma = figure2_params['sigma']
-    eta = figure2_params['eta']
-    gamma = figure2_params['gamma']
-    lbda = figure2_params['lbda']
- 
-    trajectory = almgren_chriss(big_x, big_n, big_t, sigma,
-                                lbda, eta, gamma)
-    trajectory.plot()
-
-def model_with_latency(big_x, h, big_delta, big_t,
-                       sigma, lbda, eta, gamma):
+def model_with_latency(big_x, h, big_delta, big_t, sigma, lbda, eta, gamma):
     big_n = ceil((big_t-big_delta)/h)
     big_t_tilde = big_n*h - big_delta
     eta_tilde, kappa = derived_params(eta, gamma, h, lbda, sigma)
@@ -103,23 +63,21 @@ def model_with_latency(big_x, h, big_delta, big_t,
         big_y_1 = almgren_chriss_big_y_1
     else:
         adjust = (eta_tilde*big_x)/(h*lbda*(big_delta-h)*sigma**2)
-        big_y_1 = harmonic_sum(almgren_chriss_big_y_1,
-                               adjust)
+        big_y_1 = harmonic_sum(almgren_chriss_big_y_1, adjust)
 
     inventory_values = np.hstack((big_x, big_y_1,
                                   almgren_chriss(big_y_1, big_n - 1,
-                                                 big_t_tilde, sigma,
-                                                 lbda, eta,
-                                                 gamma).values[1:]))
+                                                 big_t_tilde, sigma, lbda,
+                                                 eta, gamma).values[1:]))
 
     return pd.Series(inventory_values, time_stamps)
 
-def strategy_mean(y, h, big_delta, big_t, sigma,
-                  lbda, epsilon, eta, gamma):
+
+def strategy_mean(y, h, big_delta, big_t, sigma, lbda, epsilon, eta, gamma):
     big_n = ceil((big_t-big_delta)/h)
     big_t_tilde = big_n*h - big_delta
     eta_tilde, kappa = derived_params(eta, gamma, h, lbda, sigma)
- 
+
     almgren_chriss_big_y_1 = (y*np.sinh(kappa*big_t_tilde)
                               )/np.sinh(kappa*(big_t_tilde+h))
     if big_delta == h:
@@ -133,24 +91,25 @@ def strategy_mean(y, h, big_delta, big_t, sigma,
             + eta_tilde*big_y_1**2*(
                 np.tanh(.5*kappa*h)*(h*np.sinh(2*kappa*big_t_tilde)
                                      + 2*big_t_tilde*np.sinh(kappa*h))
-                /(np.sinh(kappa*big_t_tilde)**2*np.sinh(kappa*h))))
+                / (np.sinh(kappa*big_t_tilde)**2*np.sinh(kappa*h))))
 
-def strategy_var(y, h, big_delta, big_t, sigma,
-                 lbda, epsilon, eta, gamma):
-    big_n = ceil((big_t-big_delta)/h)
+
+def strategy_var(y, h, big_delta, big_t, sigma, lbda, epsilon, eta, gamma):
+    big_n = ceil((big_t - big_delta)/h)
     big_t_tilde = big_n*h - big_delta
     eta_tilde, kappa = derived_params(eta, gamma, h, lbda, sigma)
 
     inv_ac_big_y_1 = (np.sinh(kappa*(big_t_tilde+h))
-                      /np.sinh(kappa*big_t_tilde))
-    adjust = (h*lbda*(big_delta-h)*sigma**2)/eta_tilde
+                      / np.sinh(kappa*big_t_tilde))
+    adjust = (h*lbda*(big_delta - h)*sigma**2)/eta_tilde
     big_y_1 = y/(inv_ac_big_y_1 + adjust)
 
     return big_delta*sigma**2*big_y_1 + (.5*sigma**2*big_y_1**2*(
-             h*np.sinh(kappa*big_t_tilde)*np.cosh(kappa*(big_t_tilde-h))
+             h*np.sinh(kappa*big_t_tilde)*np.cosh(kappa*(big_t_tilde - h))
              - big_t_tilde*np.sinh(kappa*h))
-             /(np.sinh(kappa*big_t_tilde)**2*np.sinh(kappa*h)))
- 
+             / (np.sinh(kappa*big_t_tilde)**2*np.sinh(kappa*h)))
+
+
 def inventory_example():
     y = used_params['y']
     h = used_params['h']
@@ -161,14 +120,10 @@ def inventory_example():
     gamma = used_params['gamma']
     lbda = used_params['lbda']
 
-    trajectory = model_with_latency(y, h, big_delta,
-                                    big_t, sigma, lbda, eta,
+    trajectory = model_with_latency(y, h, big_delta, big_t, sigma, lbda, eta,
                                     gamma)
-    trajectory_without_latency = model_with_latency(y, h,
-                                                    h,
-                                                    big_t, sigma,
-                                                    lbda, eta,
-                                                    gamma)
+    trajectory_without_latency = model_with_latency(y, h, h, big_t, sigma,
+                                                    lbda, eta, gamma)
 
     fig = plt.figure(figsize=(10.24, 7.68))
     ax = fig.add_subplot(111)
@@ -179,10 +134,11 @@ def inventory_example():
             label=r'$\Delta$=0ms')
     ax.set_xlabel('Time (seconds)')
     ax.set_ylabel('Size of the inventory')
-    ax.set_ylim((0,1.01e6))
+    ax.set_ylim((0, 1.01e6))
     ax.legend()
     plt.tight_layout()
     plt.savefig('inventory_example.png')
+
 
 def efficient_frontier_example():
     y = used_params['y']
@@ -202,22 +158,15 @@ def efficient_frontier_example():
     variances_with_latency = np.zeros(n)
 
     for i in range(n):
-        means_with_latency[i] = strategy_mean(
-                y, h, big_delta, big_t, sigma,
-                lbdas[i], epsilon, eta, gamma)
-        variances_with_latency[i] = strategy_var(
-                y, h, big_delta, big_t, sigma,
-                lbdas[i], epsilon, eta, gamma)
-        means[i] = strategy_mean(y, h, h,
-                                 big_t, sigma, lbdas[i],
-                                 epsilon, eta, gamma)
-        variances[i] = strategy_var(y, h, h,
-                                    big_t, sigma, lbdas[i],
-                                    epsilon, eta, gamma)
-
-    meanvar_with_latency = pd.Series(means_with_latency, variances_with_latency,
-                                     name=r'$\Delta$=200ms')
-    meanvar = pd.Series(means, variances, name=r'$\Delta$=0ms')
+        means_with_latency[i] = strategy_mean(y, h, big_delta, big_t, sigma,
+                                              lbdas[i], epsilon, eta, gamma)
+        variances_with_latency[i] = strategy_var(y, h, big_delta, big_t,
+                                                 sigma, lbdas[i], epsilon,
+                                                 eta, gamma)
+        means[i] = strategy_mean(y, h, h, big_t, sigma, lbdas[i], epsilon,
+                                 eta, gamma)
+        variances[i] = strategy_var(y, h, h, big_t, sigma, lbdas[i], epsilon,
+                                    eta, gamma)
 
     fig = plt.figure(figsize=(10.24, 7.68))
     ax = fig.add_subplot(111)
@@ -253,7 +202,6 @@ def efficient_frontier_example():
 def cost_of_latency_example():
     y = used_params['y']
     h = used_params['h']
-    big_delta = used_params['Delta']
     big_t = used_params['T']
     sigma = used_params['sigma']
     epsilon = used_params['epsilon']
@@ -263,16 +211,13 @@ def cost_of_latency_example():
 
     n = 500
     latencies = np.linspace(h, 0.5*big_t, n)
-    cost_without_latency = strategy_mean(
-            y, h, h, big_t, sigma,
-            lbda, epsilon, eta, gamma)
+    cost_without_latency = strategy_mean(y, h, h, big_t, sigma, lbda, epsilon,
+                                         eta, gamma)
     costs = np.zeros(n)
 
     for i in range(n):
-        costs[i] = strategy_mean(
-            y, h, latencies[i], big_t, sigma,
-            lbda, epsilon, eta, gamma
-            ) - cost_without_latency
+        costs[i] = strategy_mean(y, h, latencies[i], big_t, sigma, lbda,
+                                 epsilon, eta, gamma) - cost_without_latency
 
     fig = plt.figure(figsize=(10.24, 7.68))
     ax = fig.add_subplot(111)
@@ -281,4 +226,3 @@ def cost_of_latency_example():
     ax.set_ylabel('Expected cost')
     plt.tight_layout()
     plt.savefig('cost_of_latency_example.png')
-
