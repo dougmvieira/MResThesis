@@ -25,7 +25,7 @@ figure2_params = {'X':       10**6,         # shares
                   'eta':     2.5*10**(-6),  # dollars per day
                   'lbda':    2*10**(-6)}
 
-used_params = {'X':       figure2_params['X'],
+used_params = {'y':       figure2_params['X'],
                'T':       miliseconds_to_days(1000),
                'sigma':   figure2_params['sigma'],
                'epsilon': figure2_params['epsilon'],
@@ -36,7 +36,7 @@ used_params = {'X':       figure2_params['X'],
                'lbda':    0.1}
 
 def print_used_params():
-    names_and_params = [('Initial inventory', '{}'.format(used_params['X'])),
+    names_and_params = [('Initial inventory', '{}'.format(used_params['y'])),
                         ('Time horizon', '{}s'.format(int(days_to_seconds(used_params['T'])))),
                         ('Volatility (daily)', '{}'.format(used_params['sigma'])),
                         (r'Temporary impact ($\epsilon$)', '{}'.format(used_params['epsilon'])),
@@ -66,47 +66,30 @@ def derived_params(eta, gamma, tau, lbda, sigma):
     kappa = _kappa(kappa_tilde_squared, tau)
     return eta_tilde, kappa
 
-def almgren_chriss(size, steps, final_time, volatility, risk_aversion,
-                   temp_impact, perma_impact):
-    sigma = volatility
-    lbda = risk_aversion
-    eta = temp_impact
-    gamma = perma_impact
-    big_t = final_time
-    big_n = steps
-
+def almgren_chriss(big_x, big_n, big_t, sigma, lbda, eta, gamma):
     tau = big_t/big_n
-    t_j = np.linspace(0, big_t, big_n + 1)
-
     eta_tilde, kappa = derived_params(eta, gamma, tau, lbda, sigma)
 
-    inventory_values = size*np.sinh(kappa*(big_t - t_j))/np.sinh(kappa*big_t)
+    t_j = np.linspace(0, big_t, big_n + 1)
+    inventory_values = big_x*np.sinh(kappa*(big_t - t_j))/np.sinh(kappa*big_t)
 
     return pd.Series(inventory_values, t_j)
 
 def almgren_chriss_example():
-    size = figure2_params['X']
-    steps = figure2_params['N']
-    final_time = figure2_params['T']
-    volatility = figure2_params['sigma']
-    temp_impact = figure2_params['eta']
-    perma_impact = figure2_params['gamma']
+    big_x = figure2_params['X']
+    big_n = figure2_params['N']
+    big_t = figure2_params['T']
+    sigma = figure2_params['sigma']
+    eta = figure2_params['eta']
+    gamma = figure2_params['gamma']
     lbda = figure2_params['lbda']
  
-    trajectory = almgren_chriss(size, steps, final_time, volatility,
-                                lbda, temp_impact, perma_impact)
+    trajectory = almgren_chriss(big_x, big_n, big_t, sigma,
+                                lbda, eta, gamma)
     trajectory.plot()
 
-def model_with_latency(size, decision_lag, execution_delay, final_time,
-                       volatility, risk_aversion, temp_impact, perma_impact):
-    h = decision_lag
-    big_delta = execution_delay
-    sigma = volatility
-    lbda = risk_aversion
-    eta = temp_impact
-    gamma = perma_impact
-    big_t = final_time
-
+def model_with_latency(big_x, h, big_delta, big_t,
+                       sigma, lbda, eta, gamma):
     big_n = ceil((big_t-big_delta)/h)
     big_t_tilde = big_n*h - big_delta
     eta_tilde, kappa = derived_params(eta, gamma, h, lbda, sigma)
@@ -114,45 +97,35 @@ def model_with_latency(size, decision_lag, execution_delay, final_time,
     impulse_exec_times = np.arange(big_n)*h + big_delta
     time_stamps = np.hstack((0, impulse_exec_times))
 
-    almgren_chriss_big_y_1 = (size*np.sinh(kappa*big_t_tilde)
+    almgren_chriss_big_y_1 = (big_x*np.sinh(kappa*big_t_tilde)
                               )/np.sinh(kappa*(big_t_tilde+h))
     if big_delta == h:
         big_y_1 = almgren_chriss_big_y_1
     else:
-        adjust = (eta_tilde*size)/(h*lbda*(big_delta-h)*sigma**2)
+        adjust = (eta_tilde*big_x)/(h*lbda*(big_delta-h)*sigma**2)
         big_y_1 = harmonic_sum(almgren_chriss_big_y_1,
                                adjust)
 
-    inventory_values = np.hstack((size, big_y_1,
+    inventory_values = np.hstack((big_x, big_y_1,
                                   almgren_chriss(big_y_1, big_n - 1,
-                                                 big_t_tilde, volatility,
-                                                 risk_aversion, temp_impact,
-                                                 perma_impact).values[1:]))
+                                                 big_t_tilde, sigma,
+                                                 lbda, eta,
+                                                 gamma).values[1:]))
 
     return pd.Series(inventory_values, time_stamps)
 
-def strategy_mean(size, decision_lag, execution_delay, final_time, volatility,
-                  risk_aversion, fix_impact, temp_impact, perma_impact):
-    h = decision_lag
-    big_delta = execution_delay
-    y = size
-    sigma = volatility
-    lbda = risk_aversion
-    epsilon = fix_impact
-    eta = temp_impact
-    gamma = perma_impact
-    big_t = final_time
-
+def strategy_mean(y, h, big_delta, big_t, sigma,
+                  lbda, epsilon, eta, gamma):
     big_n = ceil((big_t-big_delta)/h)
     big_t_tilde = big_n*h - big_delta
     eta_tilde, kappa = derived_params(eta, gamma, h, lbda, sigma)
  
-    almgren_chriss_big_y_1 = (size*np.sinh(kappa*big_t_tilde)
+    almgren_chriss_big_y_1 = (y*np.sinh(kappa*big_t_tilde)
                               )/np.sinh(kappa*(big_t_tilde+h))
     if big_delta == h:
         big_y_1 = almgren_chriss_big_y_1
     else:
-        adjust = (eta_tilde*size)/(h*lbda*(big_delta-h)*sigma**2)
+        adjust = (eta_tilde*y)/(h*lbda*(big_delta-h)*sigma**2)
         big_y_1 = harmonic_sum(almgren_chriss_big_y_1,
                                adjust)
 
@@ -162,16 +135,8 @@ def strategy_mean(size, decision_lag, execution_delay, final_time, volatility,
                                      + 2*big_t_tilde*np.sinh(kappa*h))
                 /(np.sinh(kappa*big_t_tilde)**2*np.sinh(kappa*h))))
 
-def strategy_var(size, decision_lag, execution_delay, final_time, volatility,
-                 risk_aversion, fix_impact, temp_impact, perma_impact):
-    h = decision_lag
-    big_delta = execution_delay
-    sigma = volatility
-    lbda = risk_aversion
-    eta = temp_impact
-    gamma = perma_impact
-    big_t = final_time
-
+def strategy_var(y, h, big_delta, big_t, sigma,
+                 lbda, epsilon, eta, gamma):
     big_n = ceil((big_t-big_delta)/h)
     big_t_tilde = big_n*h - big_delta
     eta_tilde, kappa = derived_params(eta, gamma, h, lbda, sigma)
@@ -179,51 +144,31 @@ def strategy_var(size, decision_lag, execution_delay, final_time, volatility,
     inv_ac_big_y_1 = (np.sinh(kappa*(big_t_tilde+h))
                       /np.sinh(kappa*big_t_tilde))
     adjust = (h*lbda*(big_delta-h)*sigma**2)/eta_tilde
-    big_y_1 = size/(inv_ac_big_y_1 + adjust)
+    big_y_1 = y/(inv_ac_big_y_1 + adjust)
 
     return big_delta*sigma**2*big_y_1 + (.5*sigma**2*big_y_1**2*(
              h*np.sinh(kappa*big_t_tilde)*np.cosh(kappa*(big_t_tilde-h))
              - big_t_tilde*np.sinh(kappa*h))
              /(np.sinh(kappa*big_t_tilde)**2*np.sinh(kappa*h)))
  
-def almgren_chriss_var(size, steps, final_time, volatility, risk_aversion,
-                       fix_impact, temp_impact, perma_impact):
-    sigma = volatility
-    lbda = risk_aversion
-    epsilon = fix_impact
-    eta = temp_impact
-    gamma = perma_impact
-    big_t = final_time
-    big_n = steps
-
-    tau = big_t/big_n
-    t_j = np.linspace(0, big_t, big_n + 1)
-
-    eta_tilde, kappa = derived_params(eta, gamma, tau, lbda, sigma)
-
-    return (.5*sigma**2*size**2*
-            (tau*np.sinh(kappa*big_t)*np.cosh(kappa*(big_t-tau))
-             -big_t*np.sinh(kappa*tau))
-            /(np.sinh(kappa*big_t)**2*np.sinh(kappa*tau)))
-
 def inventory_example():
-    size = used_params['X']
-    decision_lag = used_params['h']
-    execution_delay = used_params['Delta']
-    final_time = used_params['T']
-    volatility = used_params['sigma']
-    temp_impact = used_params['eta']
-    perma_impact = used_params['gamma']
+    y = used_params['y']
+    h = used_params['h']
+    big_delta = used_params['Delta']
+    big_t = used_params['T']
+    sigma = used_params['sigma']
+    eta = used_params['eta']
+    gamma = used_params['gamma']
     lbda = used_params['lbda']
 
-    trajectory = model_with_latency(size, decision_lag, execution_delay,
-                                    final_time, volatility, lbda, temp_impact,
-                                    perma_impact)
-    trajectory_without_latency = model_with_latency(size, decision_lag,
-                                                    decision_lag,
-                                                    final_time, volatility,
-                                                    lbda, temp_impact,
-                                                    perma_impact)
+    trajectory = model_with_latency(y, h, big_delta,
+                                    big_t, sigma, lbda, eta,
+                                    gamma)
+    trajectory_without_latency = model_with_latency(y, h,
+                                                    h,
+                                                    big_t, sigma,
+                                                    lbda, eta,
+                                                    gamma)
 
     fig = plt.figure(figsize=(10.24, 7.68))
     ax = fig.add_subplot(111)
@@ -240,14 +185,14 @@ def inventory_example():
     plt.savefig('inventory_example.png')
 
 def efficient_frontier_example():
-    size = used_params['X']
-    decision_lag = used_params['h']
-    execution_delay = used_params['Delta']
-    final_time = used_params['T']
-    volatility = used_params['sigma']
-    fix_impact = used_params['epsilon']
-    temp_impact = used_params['eta']
-    perma_impact = used_params['gamma']
+    y = used_params['y']
+    h = used_params['h']
+    big_delta = used_params['Delta']
+    big_t = used_params['T']
+    sigma = used_params['sigma']
+    epsilon = used_params['epsilon']
+    eta = used_params['eta']
+    gamma = used_params['gamma']
 
     n = 100
     lbdas = np.logspace(np.log10(1e2), np.log10(1e-2), n)
@@ -258,17 +203,17 @@ def efficient_frontier_example():
 
     for i in range(n):
         means_with_latency[i] = strategy_mean(
-                size, decision_lag, execution_delay, final_time, volatility,
-                lbdas[i], fix_impact, temp_impact, perma_impact)
+                y, h, big_delta, big_t, sigma,
+                lbdas[i], epsilon, eta, gamma)
         variances_with_latency[i] = strategy_var(
-                size, decision_lag, execution_delay, final_time, volatility,
-                lbdas[i], fix_impact, temp_impact, perma_impact)
-        means[i] = strategy_mean(size, decision_lag, decision_lag,
-                                 final_time, volatility, lbdas[i],
-                                 fix_impact, temp_impact, perma_impact)
-        variances[i] = strategy_var(size, decision_lag, decision_lag,
-                                    final_time, volatility, lbdas[i],
-                                    fix_impact, temp_impact, perma_impact)
+                y, h, big_delta, big_t, sigma,
+                lbdas[i], epsilon, eta, gamma)
+        means[i] = strategy_mean(y, h, h,
+                                 big_t, sigma, lbdas[i],
+                                 epsilon, eta, gamma)
+        variances[i] = strategy_var(y, h, h,
+                                    big_t, sigma, lbdas[i],
+                                    epsilon, eta, gamma)
 
     meanvar_with_latency = pd.Series(means_with_latency, variances_with_latency,
                                      name=r'$\Delta$=200ms')
@@ -306,27 +251,27 @@ def efficient_frontier_example():
 
 
 def cost_of_latency_example():
-    size = used_params['X']
-    decision_lag = used_params['h']
-    execution_delay = used_params['Delta']
-    final_time = used_params['T']
-    volatility = used_params['sigma']
-    fix_impact = used_params['epsilon']
-    temp_impact = used_params['eta']
-    perma_impact = used_params['gamma']
-    risk_aversion = used_params['lbda']
+    y = used_params['y']
+    h = used_params['h']
+    big_delta = used_params['Delta']
+    big_t = used_params['T']
+    sigma = used_params['sigma']
+    epsilon = used_params['epsilon']
+    eta = used_params['eta']
+    gamma = used_params['gamma']
+    lbda = used_params['lbda']
 
     n = 500
-    latencies = np.linspace(decision_lag, 0.5*final_time, n)
+    latencies = np.linspace(h, 0.5*big_t, n)
     cost_without_latency = strategy_mean(
-            size, decision_lag, decision_lag, final_time, volatility,
-            risk_aversion, fix_impact, temp_impact, perma_impact)
+            y, h, h, big_t, sigma,
+            lbda, epsilon, eta, gamma)
     costs = np.zeros(n)
 
     for i in range(n):
         costs[i] = strategy_mean(
-            size, decision_lag, latencies[i], final_time, volatility,
-            risk_aversion, fix_impact, temp_impact, perma_impact
+            y, h, latencies[i], big_t, sigma,
+            lbda, epsilon, eta, gamma
             ) - cost_without_latency
 
     fig = plt.figure(figsize=(10.24, 7.68))
