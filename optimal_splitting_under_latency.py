@@ -7,32 +7,46 @@ import numpy as np
 
 np.seterr('raise')
 
-test_params = {'S0':      50,            # dollars per share
-               'X':       10**6,         # shares
-               'T':       5,             # days
-               'N':       5,
-               'sigma':   0.95,          # dollars per share per day sqrt
-               'alpha':   0.02,          # dollars per share per day
-               'epsilon': 0.0625,        # dollars per share
-               'gamma':   2.5*10**(-7),  # dollars per share squared
-               'eta':     2.5*10**(-6),  # dollars per day
-               'lbda u':  10**(-6),      # per dollar
-               'lbda nu': 1.645}
+def days_to_seconds(days):
+    seconds_in_a_trading_day = (9*60 + 30)*60
+    return days*seconds_in_a_trading_day
+
+def miliseconds_to_days(ms):
+    minutes_in_a_trading_day = 9*60 + 30
+    miliseconds_in_a_minute = 60*1000
+    return ms/(minutes_in_a_trading_day*miliseconds_in_a_minute)
+
+figure2_params = {'X':       10**6,         # shares
+                  'T':       5,             # days
+                  'N':       5,
+                  'sigma':   0.95,          # dollars per share per day sqrt
+                  'epsilon': 0.0625,        # dollars per share
+                  'gamma':   2.5*10**(-7),  # dollars per share squared
+                  'eta':     2.5*10**(-6),  # dollars per day
+                  'lbda':    2*10**(-6)}
+
+used_params = {'X':       figure2_params['X'],
+               'T':       miliseconds_to_days(1000),
+               'sigma':   figure2_params['sigma'],
+               'epsilon': figure2_params['epsilon'],
+               'gamma':   figure2_params['gamma'],
+               'eta':     figure2_params['eta']*miliseconds_to_days(10),
+               'h':       miliseconds_to_days(10),
+               'Delta':   miliseconds_to_days(200),
+               'lbda':    0.1}
 
 def print_used_params():
-    decision_lag = miliseconds_to_days(10)
-    used_params = [('Initial inventory', test_params['X']),
-                   ('Time horizon', '1s'),
-                   ('Volatility (daily)', test_params['sigma']),
-                   (r'Temporary impact ($\epsilon$)', test_params['epsilon']),
-                   (r'Temporary impact ($\eta/h$)', test_params['eta']),
-                   ('Permanent impact', test_params['gamma']),
-                   ('Decision lag', '10ms'),
-                   ('Execution delay', '200ms'),
-                   ('Risk aversion', '0.1')]
-    pd.DataFrame(used_params, columns=['Parameter', 'Value']
+    names_and_params = [('Initial inventory', '{}'.format(used_params['X'])),
+                        ('Time horizon', '{}s'.format(int(days_to_seconds(used_params['T'])))),
+                        ('Volatility (daily)', '{}'.format(used_params['sigma'])),
+                        (r'Temporary impact ($\epsilon$)', '{}'.format(used_params['epsilon'])),
+                        (r'Temporary impact ($\eta/h$)', '{:.5}'.format(used_params['eta']/miliseconds_to_days(10))),
+                        ('Permanent impact', '{}'.format(used_params['gamma'])),
+                        ('Decision lag', '{}ms'.format(int(1000*days_to_seconds(used_params['h'])))),
+                        ('Execution delay', '{}ms'.format(int(1000*days_to_seconds(used_params['Delta'])))),
+                        ('Risk aversion', '{}'.format(used_params['lbda']))]
+    pd.DataFrame(names_and_params, columns=['Parameter', 'Value']
                  ).to_latex('used_params.tex', escape=False)
-                
 
 def harmonic_sum(x, y):
     return 1/((1/x)+(1/y))
@@ -71,15 +85,16 @@ def almgren_chriss(size, steps, final_time, volatility, risk_aversion,
     return pd.Series(inventory_values, t_j)
 
 def almgren_chriss_example():
-    size = test_params['X']
-    steps = test_params['N']
-    final_time = test_params['T']
-    volatility = test_params['sigma']
-    temp_impact = test_params['eta']
-    perma_impact = test_params['gamma']
+    size = figure2_params['X']
+    steps = figure2_params['N']
+    final_time = figure2_params['T']
+    volatility = figure2_params['sigma']
+    temp_impact = figure2_params['eta']
+    perma_impact = figure2_params['gamma']
+    lbda = figure2_params['lbda']
  
     trajectory = almgren_chriss(size, steps, final_time, volatility,
-                                2e-6, temp_impact, perma_impact)
+                                lbda, temp_impact, perma_impact)
     trajectory.plot()
 
 def model_with_latency(size, decision_lag, execution_delay, final_time,
@@ -191,24 +206,15 @@ def almgren_chriss_var(size, steps, final_time, volatility, risk_aversion,
              -big_t*np.sinh(kappa*tau))
             /(np.sinh(kappa*big_t)**2*np.sinh(kappa*tau)))
 
-def days_to_seconds(days):
-    seconds_in_a_trading_day = (9*60 + 30)*60
-    return days*seconds_in_a_trading_day
-
-def miliseconds_to_days(ms):
-    minutes_in_a_trading_day = 9*60 + 30
-    miliseconds_in_a_minute = 60*1000
-    return ms/(minutes_in_a_trading_day*miliseconds_in_a_minute)
-
 def inventory_example():
-    size = test_params['X']
-    decision_lag = miliseconds_to_days(10)
-    execution_delay = miliseconds_to_days(200)
-    final_time = miliseconds_to_days(1000)
-    volatility = test_params['sigma']
-    temp_impact = test_params['eta']*decision_lag
-    perma_impact = test_params['gamma']
-    lbda = .1
+    size = used_params['X']
+    decision_lag = used_params['h']
+    execution_delay = used_params['Delta']
+    final_time = used_params['T']
+    volatility = used_params['sigma']
+    temp_impact = used_params['eta']
+    perma_impact = used_params['gamma']
+    lbda = used_params['lbda']
 
     trajectory = model_with_latency(size, decision_lag, execution_delay,
                                     final_time, volatility, lbda, temp_impact,
@@ -234,14 +240,14 @@ def inventory_example():
     plt.savefig('inventory_example.png')
 
 def efficient_frontier_example():
-    size = test_params['X']
-    decision_lag = miliseconds_to_days(10)
-    execution_delay = miliseconds_to_days(200)
-    final_time = miliseconds_to_days(1000)
-    volatility = test_params['sigma']
-    fix_impact = test_params['epsilon']
-    temp_impact = test_params['eta']*decision_lag
-    perma_impact = test_params['gamma']
+    size = used_params['X']
+    decision_lag = used_params['h']
+    execution_delay = used_params['Delta']
+    final_time = used_params['T']
+    volatility = used_params['sigma']
+    fix_impact = used_params['epsilon']
+    temp_impact = used_params['eta']
+    perma_impact = used_params['gamma']
 
     n = 100
     lbdas = np.logspace(np.log10(1e2), np.log10(1e-2), n)
@@ -300,15 +306,15 @@ def efficient_frontier_example():
 
 
 def cost_of_latency_example():
-    size = test_params['X']
-    decision_lag = miliseconds_to_days(10)
-    execution_delay = miliseconds_to_days(200)
-    final_time = miliseconds_to_days(1000)
-    volatility = test_params['sigma']
-    fix_impact = test_params['epsilon']
-    temp_impact = test_params['eta']*decision_lag
-    perma_impact = test_params['gamma']
-    risk_aversion = .1
+    size = used_params['X']
+    decision_lag = used_params['h']
+    execution_delay = used_params['Delta']
+    final_time = used_params['T']
+    volatility = used_params['sigma']
+    fix_impact = used_params['epsilon']
+    temp_impact = used_params['eta']
+    perma_impact = used_params['gamma']
+    risk_aversion = used_params['lbda']
 
     n = 500
     latencies = np.linspace(decision_lag, 0.5*final_time, n)
